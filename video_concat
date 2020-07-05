@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+
+# Find input files and add them to array
+files=()
+example_name=
+for f in "$@"; do
+    if [ -f "$f" ]; then
+        # Add file
+        file=$(readlink -f "$f")
+        echo "+ $file"
+        files+=("$f")
+    elif [ -d "$f" ]; then
+        # Add files in directory
+        echo "D $f..."
+        if [ -z "$example_name" ]; then
+            example_name=$(echo "$f" | tr '/' '_')
+        fi
+        while read -r -d $'\0' file
+        do
+            # Add file
+            file=$(readlink -f "$file")
+            echo "+ $file"
+            files+=("$file")
+        done < <(find "$f" -maxdepth 1 -type f -iregex '.*\.\(mpg\|mov\|avi\|mp4\)' -print0 | sort -z)
+
+    fi
+done
+count=${#files[@]}
+echo "# $count"
+if [ $count -eq 0 ]; then
+    exit 0
+fi
+
+# Generate target file name
+target_file=$(cat /dev/urandom | tr -cd 'a-f0-9' | head -c 32).mpg
+if [ -n "$example_name" ]; then
+    target_file="$example_name $target_file"
+fi
+if [ -e "$target_file" ]; then
+    zenity --error --text "Target file exists: $target_file"
+    exit 1
+fi
+
+# Ask for confirmation
+zenity --question --text "Create target file: $target_file\nIn: $PWD\nOK?"
+if [[ $? -ne 0 ]]; then
+    exit 0
+fi
+
+# Create temp files
+list_file=$(mktemp /tmp/.video-concat.tmp.XXXXXX)
+if ! truncate -s 0 "$list_file" &>/dev/null; then
+    zenity --error --text "Failed to create temporary file: $list_file"
+    exit 1
+fi
+output_file=$(mktemp /tmp/.video-concat.tmp.XXXXXX)
+if ! truncate -s 0 "$output_file" &>/dev/null; then
+    zenity --error --text "Failed to create temporary file: $output_file"
+    exit 1
+fi
+
+# Write file list to temp file
+for f in "${files[@]}"; do
+    echo "file '$f'" >>"$list_file"
+done
+
+# Ask ffmpeg to concat/combine/merge input files
+zenity --info --text "Saving output in: $output_file"
+ffmpeg -safe 0 -f concat -i "$list_file" "$target_file" 2>&1 | tee "$output_file"
+code=$?
+if [ $code -eq 0 ]; then
+    zenity --info --text "Done: $target_file"
+    rm "$list_file"
+    rm "$output_file"
+else
+    zenity --error --text "Error"
+    zenity --warning --text "Input list: $list_file"
+    exit 1
+fi
+
+
+
