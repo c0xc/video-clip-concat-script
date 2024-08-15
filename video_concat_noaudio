@@ -24,13 +24,29 @@ for f in "$@"; do
             echo "+ $file"
             files+=("$file")
         done < <(find "$f" -maxdepth 1 -type f -iregex '.*\.\(mpg\|mov\|avi\|mp4\)' -print0 | sort -z)
-
     fi
 done
 count=${#files[@]}
 echo "# $count"
 if [ $count -eq 0 ]; then
     exit 0
+fi
+
+# Check files, determine container format
+auto_container=
+for i in ${!files[@]}; do
+    file="${files[i]}"
+    ext="${file##*.}"
+    if [[ -z "$auto_container" ]]; then
+        # Remember file extension from first file
+        auto_container="$ext"
+    elif [[ "$auto_container" != "$ext" ]]; then
+        # Current file has a different extension than previous one
+        auto_container=
+    fi
+done
+if [[ -n "$auto_container" && -z "$CONTAINER" ]]; then
+    CONTAINER="${auto_container,,}"
 fi
 
 # Destination directory
@@ -40,12 +56,14 @@ if ! [[ -d "$dir" ]]; then
 fi
 
 # Generate target file name
-first_file=$files[0]
-first_file=$(basename "${first_file}")
-random_str=$(cat /dev/urandom | tr -cd 'a-f0-9' | head -c 16)
-target_file=$(echo "${first_file%.*} ${random_str}").mkv
+if ! [[ "$CONTAINER" =~ ^[a-z0-9]{3}$ ]]; then
+    CONTAINER=mkv
+fi
+# auto-determine container from input files to allow fast copy
+target_file=$(cat /dev/urandom | tr -cd 'a-f0-9' | head -c 32).$CONTAINER
 if [ -n "$example_name" ]; then
-    target_file="$example_name $target_file"
+    example_name=$(echo "$example_name" | tr ' ' '_')
+    target_file="${example_name}_${target_file}"
 fi
 target_file=$(echo "$target_file" | tr ' ' '_')
 # full file path
@@ -63,15 +81,12 @@ if [[ $? -ne 0 ]]; then
 fi
 
 # Create temp files
-tmp_dir=/tmp
-home_tmp="$HOME/tmp"
-[[ -d "$home_tmp" && -x "$home_tmp" && -w "$home_tmp" ]] && tmp_dir=$home_tmp
-list_file=$(mktemp ${tmp_dir}/video-concat.tmp.XXXXXX)
+list_file=$(mktemp "$dir/video-concat.tmp.XXXXXX")
 if ! truncate -s 0 "$list_file" &>/dev/null; then
     zenity --error --text "Failed to create temporary file: $list_file"
     exit 1
 fi
-output_file=$(mktemp ${tmp_dir}/video-concat.tmp.XXXXXX)
+output_file=$(mktemp "$dir/video-concat.tmp.XXXXXX")
 if ! truncate -s 0 "$output_file" &>/dev/null; then
     zenity --error --text "Failed to create temporary file: $output_file"
     exit 1
@@ -84,12 +99,13 @@ done
 
 # Ask ffmpeg to concat/combine/merge input files
 zenity --info --text "Saving output in: $output_file"
-ffmpeg -safe 0 -f concat -i "$list_file" "$target_file" 2>&1 | tee "$output_file"
+echo "ffmpeg -safe 0 -f concat -an -i $list_file -c copy $target_file"
+ffmpeg -safe 0 -f concat -an -i "$list_file" -c copy "$target_file" 2>&1 | tee "$output_file"
 code=$?
 if [ $code -eq 0 ]; then
     zenity --info --text "Done: $target_file"
-    rm "$list_file"
-    rm "$output_file"
+    #rm "$list_file"
+    #rm "$output_file"
 else
     zenity --error --text "Error: $output_file"
     exit 1

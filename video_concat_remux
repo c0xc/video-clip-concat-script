@@ -44,6 +44,7 @@ first_file=$files[0]
 first_file=$(basename "${first_file}")
 random_str=$(cat /dev/urandom | tr -cd 'a-f0-9' | head -c 16)
 target_file=$(echo "${first_file%.*} ${random_str}").mkv
+target_file=$(echo "$target_file" | tr ' ' '_')
 if [ -n "$example_name" ]; then
     target_file="$example_name $target_file"
 fi
@@ -82,9 +83,19 @@ for f in "${files[@]}"; do
     echo "file '$f'" >>"$list_file"
 done
 
+# Codec option
+codec_option=
+# check if x265 is installed?
+ld_out=$(ldconfig -p)
+if grep -wq libx265 <<<"$ld_out"; then
+    codec_option="-vcodec libx265"
+    codec_option="-c:v libx265"
+fi
+
 # Ask ffmpeg to concat/combine/merge input files
 zenity --info --text "Saving output in: $output_file"
-ffmpeg -safe 0 -f concat -i "$list_file" "$target_file" 2>&1 | tee "$output_file"
+echo "ffmpeg -safe 0 -f concat -i $list_file $codec_option $target_file"
+ffmpeg -safe 0 -f concat -i "$list_file" $codec_option "$target_file" 2>&1 | tee "$output_file"
 code=$?
 if [ $code -eq 0 ]; then
     zenity --info --text "Done: $target_file"
