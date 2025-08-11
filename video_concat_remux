@@ -83,19 +83,37 @@ for f in "${files[@]}"; do
     echo "file '$f'" >>"$list_file"
 done
 
+# Input, filter arguments for source files
+input_args=()
+filter_inputs=""
+n=${#files[@]}
+for i in "${!files[@]}"; do
+    input_args+=("-i" "${files[$i]}")
+    filter_inputs+="[$i:v:0]"
+done
+# Build filter string
+filter_complex="${filter_inputs}concat=n=${n}:v=1[outv]"
+
 # Codec option
 codec_option=
 # check if x265 is installed?
 ld_out=$(ldconfig -p)
 if grep -wq libx265 <<<"$ld_out"; then
-    codec_option="-vcodec libx265"
     codec_option="-c:v libx265"
 fi
 
 # Ask ffmpeg to concat/combine/merge input files
 zenity --info --text "Saving output in: $output_file"
-echo "ffmpeg -safe 0 -f concat -i $list_file $codec_option $target_file"
-ffmpeg -safe 0 -f concat -i "$list_file" $codec_option "$target_file" 2>&1 | tee "$output_file"
+echo "ffmpeg -fflags +discardcorrupt+genpts -err_detect ignore_err \
+${input_args[@]} \
+-filter_complex $filter_complex -map [outv] \
+-vsync vfr -c:v libx265 -crf 28 $target_file"
+
+ffmpeg -fflags "+discardcorrupt+genpts" -err_detect ignore_err \
+"${input_args[@]}" \
+-filter_complex "$filter_complex" -map "[outv]" \
+-vsync vfr -c:v libx265 -crf 28 "$target_file"
+
 code=$?
 if [ $code -eq 0 ]; then
     zenity --info --text "Done: $target_file"
